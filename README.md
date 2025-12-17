@@ -1,2 +1,15 @@
 # SparkRouter
-SparkRouter is a platform-agnostic job routing framework for Spark ETL pipelines. It enables the same business logic to run across Databricks, AWS Glue, EMR, and Docker containers using a combination of Factory, Template Method, and Dependency Injection patterns.
+
+Platform-agnostic job routing framework for Spark ETL pipelines.
+
+**Status: Coming Soon**
+
+Write your ETL logic once, run it on Databricks, AWS Glue, EMR, or Docker containers.
+
+## Installation
+
+  ```bash
+  pip install sparkrouter
+```
+
+Full documentation and features coming soon.
