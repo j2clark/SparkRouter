@@ -29,11 +29,9 @@ Quick Start:
 from sparkrouter.version import __version__
 from sparkrouter.job.abstract_job import AbstractJob
 from sparkrouter.job.abstract_job_factory import AbstractJobFactory
-from sparkrouter.services.notification import NotificationService
 
 __all__ = [
     "__version__",
     "AbstractJob",
     "AbstractJobFactory",
-    "NotificationService",
 ]

@@ -12,7 +12,6 @@ Write your ETL logic once, run it on Databricks, AWS Glue, EMR, or Docker contai
 
 - **Write Once, Run Anywhere**: Same job code runs on multiple Spark platforms
 - **Clean Architecture**: Factory + Template Method patterns keep code testable
-- **No Mocks Needed**: Dependency injection with Noop implementations for testing
 - **Configuration-Driven**: JSON config via CLI, no code changes between environments
 
 ## Installation
@@ -217,23 +216,6 @@ spark-submit s3://my-bucket/scripts/emr_entry.py \
 ```
 
 ---
-
-## Testing Without Mocks
-
-Use Noop implementations instead of mocks:
-
-```python
-from sparkrouter.testing.noop import NoopNotificationService
-
-def test_my_job():
-    notifier = NoopNotificationService()
-    job = MyETLJob(notification_service=notifier)
-
-    result = job.run(input_path="/in", output_path="/out")
-
-    assert result["records_processed"] == 1000
-    assert len(notifier.notifications) == 1
-```
 
 ## Examples
 

@@ -216,3 +216,4 @@ __marimo__/
 /.idea/SparkRouter.iml
 /.idea/vcs.xml
 /poc
+/.claude/settings.local.json
