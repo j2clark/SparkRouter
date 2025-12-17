@@ -23,162 +23,204 @@ uv add sparkrouter
 pip install sparkrouter
 ```
 
-With optional dependencies:
-
-```bash
-uv add sparkrouter[spark]  # Include PySpark
-uv add sparkrouter[aws]    # Include boto3
-uv add sparkrouter[all]    # Include everything
-```
-
 ## Quick Start
 
-### 1. Define Your Job
+### How It Works
+
+```mermaid
+flowchart LR
+    A["Airflow DAG"] --> B["Entry Script"] --> C["Your Job Factory"] --> D["Your Job"]
+```
+
+1. **Airflow** (or any orchestrator) triggers a Spark platform job
+2. The **entry script** routes to your code via `--module_name`
+3. Your **factory** creates the job with dependencies
+4. Your **job** runs the business logic
+
+### Step 1: Write Your Job
 
 ```python
-from sparkrouter import AbstractJob, AbstractJobFactory, NotificationService
+# my_etl_job.py
+from sparkrouter import AbstractJob
 
 class MyETLJob(AbstractJob):
-    """Your ETL job with business logic."""
-
-    def __init__(self, notification_service: NotificationService):
-        self.notification_service = notification_service
-
     def execute_job(self, input_path: str, output_path: str) -> dict:
         # Your business logic here
         print(f"Processing {input_path} -> {output_path}")
         return {"records_processed": 1000}
 
     def on_success(self, results):
-        self.notification_service.send_notification(
-            subject="Job Success",
-            message=f"Processed {results['records_processed']} records"
-        )
+        print(f"Done: {results['records_processed']} records")
 
     def on_failure(self, error_message):
-        self.notification_service.send_notification(
-            subject="Job Failed",
-            message=error_message
-        )
+        print(f"Failed: {error_message}")
 ```
 
-### 2. Create a Factory
+### Step 2: Write Your Factory
 
 ```python
-from sparkrouter.testing.noop import NoopNotificationService
+# my_etl_job_factory.py
+from sparkrouter import AbstractJobFactory
+from my_etl_job import MyETLJob
 
 class MyETLJobFactory(AbstractJobFactory):
-    """Factory that assembles jobs with dependencies."""
-
     def create_job(self, **kwargs) -> MyETLJob:
-        config = self.parse_job_config(job_name='my_etl_job', **kwargs)
-        return MyETLJob(
-            notification_service=NoopNotificationService()
-        )
+        return MyETLJob()
 
 def main(**kwargs):
-    """Entry point called by platform scripts."""
+    """Entry point called by SparkRouter."""
     factory = MyETLJobFactory()
     return factory.run(**kwargs)
 ```
 
-### 3. Run It
+### Step 3: Run Locally
+
+No entry script needed - run directly from the installed package:
 
 ```bash
-# Local / Container
 python -m sparkrouter.entry_points.container \
-    --module_name mypackage.my_etl_job_factory \
-    --my_etl_job '{}' \
-    --input_path "s3://bucket/input/" \
-    --output_path "s3://bucket/output/"
+    --module_name my_etl_job_factory \
+    --input_path "/data/input" \
+    --output_path "/data/output"
 ```
 
-The same job runs on Databricks, Glue, or EMR - just use a different entry point.
+---
 
-## Architecture
+## Platform Deployment
 
-```
-Entry Point (platform-specific)
-     │
-     ▼
-importlib.import_module(module_name).main(**kwargs)
-     │
-     ▼
-AbstractJobFactory.run()
-     │
-     ▼
-ConcreteFactory.create_job()  →  inject dependencies
-     │
-     ▼
-AbstractJob.run()  →  Template Method (final)
-     │
-     ▼
-ConcreteJob.execute_job()  →  Your business logic
-     │
-     ▼
-on_success() or on_failure()
-```
-
-## Platform Entry Points
-
-SparkRouter provides entry points for each platform:
-
-| Platform | Entry Point | Service Provider |
-|----------|-------------|------------------|
-| Databricks | `sparkrouter.entry_points.databricks` | `DATABRICKS` |
-| AWS Glue | `sparkrouter.entry_points.glue` | `GLUE` |
-| Amazon EMR | `sparkrouter.entry_points.emr` | `EMR` |
-| Container/Local | `sparkrouter.entry_points.container` | `CONTAINER` |
-
-Each entry point:
-1. Parses CLI arguments
-2. Adds platform context (`service_provider`, `has_spark`)
-3. Dynamically imports your module
-4. Calls `main(**kwargs)`
-
-## Airflow Integration
+When deploying to Glue, Databricks, or EMR, those platforms require a script file at an S3/DBFS location. SparkRouter uses a **single entry script per platform** that routes to any of your jobs via `--module_name`. You create this script once, upload it once, and reuse it for all jobs.
 
 ### AWS Glue
 
-```python
-from airflow.providers.amazon.aws.operators.glue import GlueJobOperator
+**1. Create the entry script** (one time):
 
-task = GlueJobOperator(
-    task_id='my_etl',
-    job_name='my-glue-job',
-    script_location='s3://bucket/scripts/glue/entry.py',
+```python
+# glue_entry.py
+from sparkrouter.entry_points.glue import main
+
+if __name__ == "__main__":
+    main()
+```
+
+**2. Upload to S3** (one time):
+
+```bash
+aws s3 cp glue_entry.py s3://my-bucket/scripts/glue_entry.py
+```
+
+**3. Run any job** by specifying `--module_name`:
+
+```python
+GlueJobOperator(
+    script_location='s3://my-bucket/scripts/glue_entry.py',
     script_args={
-        '--module_name': 'mypackage.my_etl_job_factory',
-        '--my_etl_job': '{"key": "value"}',
-        '--input_path': 's3://bucket/input/',
-        '--output_path': 's3://bucket/output/',
+        '--module_name': 'mypackage.jobs.my_etl_job_factory',
+        '--input_path': 's3://data/input/',
+        '--output_path': 's3://data/output/',
+    },
+    default_arguments={
+        '--additional-python-modules': 'sparkrouter,mypackage',
     },
 )
 ```
 
 ### Databricks
 
-```python
-from airflow.providers.databricks.operators.databricks import DatabricksSubmitRunOperator
+**1. Create the entry script** (one time):
 
-task = DatabricksSubmitRunOperator(
-    task_id='my_etl',
-    databricks_conn_id='databricks_default',
+```python
+# databricks_entry.py
+from sparkrouter.entry_points.container import ContainerEntryPoint
+
+class DatabricksEntryPoint(ContainerEntryPoint):
+    @property
+    def service_provider(self) -> str:
+        return "DATABRICKS"
+
+    def detect_spark(self) -> bool:
+        return True  # Databricks always has Spark
+
+def main(argv=None):
+    return DatabricksEntryPoint().run(argv)
+
+if __name__ == "__main__":
+    main()
+```
+
+**2. Upload to DBFS** (one time):
+
+```bash
+databricks fs cp databricks_entry.py dbfs:/scripts/databricks_entry.py
+```
+
+**3. Run any job** by specifying `--module_name`:
+
+```python
+DatabricksSubmitRunOperator(
     spark_python_task={
-        'python_file': 'dbfs:/scripts/databricks/entry.py',
+        'python_file': 'dbfs:/scripts/databricks_entry.py',
         'parameters': [
-            '--module_name', 'mypackage.my_etl_job_factory',
-            '--my_etl_job', '{"key": "value"}',
-            '--input_path', 's3://bucket/input/',
-            '--output_path', 's3://bucket/output/',
+            '--module_name', 'mypackage.jobs.my_etl_job_factory',
+            '--input_path', 's3://data/input/',
+            '--output_path', 's3://data/output/',
         ],
     },
+    libraries=[
+        {'pypi': {'package': 'sparkrouter'}},
+        {'pypi': {'package': 'mypackage'}},
+    ],
 )
 ```
 
+### EMR
+
+**1. Create the entry script** (one time):
+
+```python
+# emr_entry.py
+import os
+from sparkrouter.entry_points.container import ContainerEntryPoint
+
+class EMREntryPoint(ContainerEntryPoint):
+    @property
+    def service_provider(self) -> str:
+        return "EMR"
+
+    def add_platform_context(self, args):
+        args = super().add_platform_context(args)
+        args['region'] = os.environ.get('AWS_REGION')
+        return args
+
+    def detect_spark(self) -> bool:
+        return True  # EMR always has Spark
+
+def main(argv=None):
+    return EMREntryPoint().run(argv)
+
+if __name__ == "__main__":
+    main()
+```
+
+**2. Upload to S3** (one time):
+
+```bash
+aws s3 cp emr_entry.py s3://my-bucket/scripts/emr_entry.py
+```
+
+**3. Run any job** via spark-submit:
+
+```bash
+spark-submit s3://my-bucket/scripts/emr_entry.py \
+    --module_name mypackage.jobs.my_etl_job_factory \
+    --input_path s3://data/input/ \
+    --output_path s3://data/output/
+```
+
+---
+
 ## Testing Without Mocks
 
-SparkRouter encourages testing with Noop implementations instead of mocks:
+Use Noop implementations instead of mocks:
 
 ```python
 from sparkrouter.testing.noop import NoopNotificationService
@@ -191,12 +233,11 @@ def test_my_job():
 
     assert result["records_processed"] == 1000
     assert len(notifier.notifications) == 1
-    assert "Success" in notifier.notifications[0]["subject"]
 ```
 
 ## Examples
 
-See the [examples](examples/) directory for complete working examples:
+See the [examples](examples/) directory:
 
 - [Simple ETL Job](examples/simple_etl/) - Basic job with factory pattern
 - [Airflow DAGs](examples/airflow/) - Glue and Databricks DAG examples
