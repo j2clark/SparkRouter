@@ -129,18 +129,7 @@ GlueJobOperator(
 
 ```python
 # databricks_entry.py
-from sparkrouter.entry_points.container import ContainerEntryPoint
-
-class DatabricksEntryPoint(ContainerEntryPoint):
-    @property
-    def service_provider(self) -> str:
-        return "DATABRICKS"
-
-    def detect_spark(self) -> bool:
-        return True  # Databricks always has Spark
-
-def main(argv=None):
-    return DatabricksEntryPoint().run(argv)
+from sparkrouter.entry_points.databricks import main
 
 if __name__ == "__main__":
     main()

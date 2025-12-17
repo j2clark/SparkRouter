@@ -7,6 +7,7 @@ from sparkrouter.entry_points.base import (
     validate_required_args,
     BaseEntryPoint,
 )
+from sparkrouter.entry_points.databricks import DatabricksEntryPoint
 from sparkrouter.entry_points.glue import GlueEntryPoint
 from sparkrouter.entry_points.container import ContainerEntryPoint
 
@@ -72,6 +73,27 @@ class TestValidateRequiredArgs:
             validate_required_args(args, ["arg1", "arg2"])
         assert "arg1" in str(exc_info.value)
         assert "arg2" in str(exc_info.value)
+
+
+class TestDatabricksEntryPoint:
+    """Tests for Databricks entry point."""
+
+    def test_service_provider(self):
+        entry = DatabricksEntryPoint()
+        assert entry.service_provider == "DATABRICKS"
+
+    def test_detect_spark_always_true(self):
+        entry = DatabricksEntryPoint()
+        assert entry.detect_spark() is True
+
+    def test_prepare_module_args_adds_service_provider(self):
+        entry = DatabricksEntryPoint()
+        args = {"module_name": "my.module", "param": "value"}
+        module_name, cleaned = entry.prepare_module_args(args)
+        assert module_name == "my.module"
+        assert cleaned["service_provider"] == "DATABRICKS"
+        assert cleaned["has_spark"] is True
+        assert "module_name" not in cleaned
 
 
 class TestGlueEntryPoint:
